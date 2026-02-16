@@ -9,7 +9,8 @@ import {
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { useCamera } from '../hooks/useCamera'; // Import the hook
-import { uploadImageToCloudinary } from '../image backend/cloudinaryService';
+import { uploadImageToCloudinary } from '../utils/cloudinary';
+import { getFromPantry, saveToPantry } from '../utils/pantry';
 
 // STEPS MAPPED TO YOUR WORKFLOW
 const steps = ['Basic Info', 'Lineage & Origin', 'Visual ID', 'Health & Stats', 'Review'];
@@ -314,6 +315,83 @@ const AddCow: React.FC = () => {
         muzzleImage: '', leftImage: '', rightImage: '', backImage: '', tailImage: ''
     });
 
+    const handleSubmit = async () => {
+        try {
+            // Upload images first
+            const muzzleUrl = formData.muzzleImage
+                ? await uploadImageToCloudinary(formData.muzzleImage)
+                : null;
+
+            const leftUrl = formData.leftImage
+                ? await uploadImageToCloudinary(formData.leftImage)
+                : null;
+
+            const rightUrl = formData.rightImage
+                ? await uploadImageToCloudinary(formData.rightImage)
+                : null;
+
+            const backUrl = formData.backImage
+                ? await uploadImageToCloudinary(formData.backImage)
+                : null;
+
+            const tailUrl = formData.tailImage
+                ? await uploadImageToCloudinary(formData.tailImage)
+                : null;
+
+            // Create payload using Cloudinary URLs
+            const cowPayload = {
+                id: Date.now(),
+                tagNumber: formData.tagNo,
+                name: formData.name,
+                species: formData.species,
+                breed: formData.breed,
+                sex: formData.sex,
+                dob: formData.dob,
+                sireTag: formData.sireTag,
+                damTag: formData.damTag,
+                source: formData.source,
+                photos: {
+                    muzzle: muzzleUrl,
+                    leftProfile: leftUrl,
+                    rightProfile: rightUrl,
+                    backView: backUrl,
+                    tail: tailUrl,
+                },
+                currentWeight: formData.currentWeight,
+                productionStatus: formData.productionStatus,
+                createdAt: new Date().toISOString(),
+            };
+
+            // Save to Pantry
+            const existingData = await getFromPantry();
+
+            // 1. If existingData is an object with a 'cows' key, use that. 
+            // Otherwise, fall back to an empty array.
+            const cowsArray = (existingData && Array.isArray(existingData.cows))
+                ? existingData.cows
+                : [];
+
+            console.log("Current herd:", cowsArray);
+
+            // 2. Add the new cow to the local array
+            cowsArray.push(cowPayload);
+
+            // 3. IMPORTANT: Wrap the array in an OBJECT before saving
+            const success = await saveToPantry({ cows: cowsArray });
+
+            if (success) {
+                alert("Cow Registered Successfully ✅");
+            } else {
+                alert("Failed to Register ❌");
+            }
+
+        } catch (error) {
+            console.error(error);
+            alert("Upload failed ❌");
+        }
+    };
+
+
     const handleChange = (field: string) => (e: React.ChangeEvent<HTMLInputElement>) => {
         const value = e.target.value;
         setFormData(prev => {
@@ -379,7 +457,9 @@ const AddCow: React.FC = () => {
             <Paper elevation={12} sx={{ position: 'fixed', bottom: 0, left: 0, right: 0, p: 2, bgcolor: 'white', zIndex: 1300, borderTop: '1px solid #E5E7EB', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Button disabled={activeStep === 0} onClick={handleBack} sx={{ color: 'text.secondary', fontWeight: 600 }}>Back</Button>
                 <Typography variant="caption" fontWeight="bold" color="text.secondary">Step {activeStep + 1} of {steps.length}</Typography>
-                <Button variant="contained" onClick={activeStep === steps.length - 1 ? () => alert("Saved!") : handleNext} endIcon={activeStep === steps.length - 1 ? <CheckCircle /> : <ArrowForward />} sx={{ px: 4, borderRadius: 4, boxShadow: '0 4px 12px rgba(46, 125, 50, 0.3)' }}>
+                <Button
+                    variant="contained"
+                    onClick={activeStep === steps.length - 1 ? handleSubmit : handleNext} endIcon={activeStep === steps.length - 1 ? <CheckCircle /> : <ArrowForward />} sx={{ px: 4, borderRadius: 4, boxShadow: '0 4px 12px rgba(46, 125, 50, 0.3)' }}>
                     {activeStep === steps.length - 1 ? 'Submit' : 'Next'}
                 </Button>
             </Paper>
