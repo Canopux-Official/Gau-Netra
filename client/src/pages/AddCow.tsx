@@ -9,6 +9,7 @@ import {
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { useCamera } from '../hooks/useCamera'; // Import the hook
+import { uploadImageToCloudinary } from '../image backend/cloudinaryService';
 
 // STEPS MAPPED TO YOUR WORKFLOW
 const steps = ['Basic Info', 'Lineage & Origin', 'Visual ID', 'Health & Stats', 'Review'];
@@ -143,25 +144,35 @@ const StepOrigin: React.FC<StepProps> = ({ formData, handleChange }) => (
 // --- STEP 3: VISUAL ID (CAMERA) ---
 const PhotoCaptureBox = ({ label, currentImage, required = false, onCapture }: { label: string, currentImage?: string, required?: boolean, onCapture: (img: string) => void }) => {
     const { takePhoto } = useCamera();
+    const [isUploading, setIsUploading] = useState(false);
 
     const handleClick = async () => {
+        setIsUploading(true);
         const img = await takePhoto();
-        if (img) onCapture(img);
+        if (img) {
+            await onCapture(img); // Wait for upload to complete
+        }
+        setIsUploading(false);
     };
 
     return (
         <Paper
             elevation={0}
-            onClick={handleClick}
+            onClick={isUploading ? undefined : handleClick}
             sx={{
                 bgcolor: '#F3F4F6', border: '2px dashed #CBD5E1', borderRadius: 3,
                 p: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                height: required ? 160 : 110, cursor: 'pointer', position: 'relative', overflow: 'hidden',
-                transition: '0.2s', '&:active': { transform: 'scale(0.98)' }
+                height: required ? 160 : 110, cursor: isUploading ? 'wait' : 'pointer', position: 'relative', overflow: 'hidden',
+                transition: '0.2s', '&:active': { transform: 'scale(0.98)' },
+                opacity: isUploading ? 0.6 : 1
             }}
         >
-            {currentImage ? (
+            {currentImage && currentImage !== 'uploading...' ? (
                 <img src={currentImage} alt={label} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            ) : isUploading || currentImage === 'uploading...' ? (
+                <>
+                    <Typography variant="caption" fontWeight={600}>Uploading...</Typography>
+                </>
             ) : (
                 <>
                     <CameraAlt color={required ? 'primary' : 'action'} sx={{ fontSize: 32, mb: 1 }} />
@@ -321,8 +332,22 @@ const AddCow: React.FC = () => {
         });
     };
 
-    const handlePhotoCapture = (field: keyof CowFormData, img: string) => {
-        setFormData(prev => ({ ...prev, [field]: img }));
+    const handlePhotoCapture = async (field: keyof CowFormData, img: string) => {
+        // Show loading state (optional)
+        setFormData(prev => ({ ...prev, [field]: 'uploading...' }));
+
+        // Upload to Cloudinary
+        const cloudinaryUrl = await uploadImageToCloudinary(img);
+        console.log(cloudinaryUrl)
+
+        if (cloudinaryUrl) {
+            // Store the Cloudinary URL instead of base64
+            setFormData(prev => ({ ...prev, [field]: cloudinaryUrl }));
+        } else {
+            // Handle error - maybe store base64 as fallback or show error
+            alert('Failed to upload image. Please try again.');
+            setFormData(prev => ({ ...prev, [field]: '' }));
+        }
     };
 
     const handleNext = () => setActiveStep((prev) => prev + 1);

@@ -5,8 +5,8 @@ const theme = createTheme({
     palette: {
         mode: 'light',
         primary: {
-            main: '#0A5C36', // Deep Forest Green (More professional than standard green)
-            light: '#34D399',
+            main: '#c17921', // Deep Forest Green (More professional than standard green)
+            light: '#d38b34',
             contrastText: '#ffffff',
         },
         secondary: {
