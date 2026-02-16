@@ -272,7 +272,7 @@ const MyCows: React.FC = () => {
                 color="secondary"
                 aria-label="add"
                 sx={{ position: 'fixed', bottom: 90, right: 24, boxShadow: '0 4px 12px rgba(245, 158, 11, 0.5)' }}
-                onClick={() => navigate('/add-cow')}
+                onClick={() => navigate('/add')}
             >
                 <Add />
             </Fab>
