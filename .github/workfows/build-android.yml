@@ -1,16 +1,14 @@
 name: Build Android APK
 
 on:
-  # Trigger on push to EITHER main or master
   push:
     branches: [ "main", "master" ]
-  # Allow manual trigger via button
-  workflow_dispatch:
+  workflow_dispatch: # Allows you to manually trigger the build button
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
@@ -26,27 +24,27 @@ jobs:
           distribution: 'zulu'
           java-version: '17'
 
-      # Install dependencies and build the React App
+      # 1. Install Dependencies & Build React
       - name: Install & Build Web
         working-directory: ./client
         run: |
           npm ci
           npm run build
 
-      # Add Capacitor & Sync
+      # 2. Sync Capacitor (Copies 'dist' to 'android')
       - name: Sync Capacitor
         working-directory: ./client
         run: |
           npx cap sync android
 
-      # Build the actual APK
+      # 3. Build the APK (Debug Mode - No Secrets Required)
       - name: Build Debug APK
         working-directory: ./client/android
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug
 
-      # Upload the APK so you can download it
+      # 4. Upload the APK to GitHub
       - name: Upload APK
         uses: actions/upload-artifact@v3
         with:
