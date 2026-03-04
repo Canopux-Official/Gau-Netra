@@ -1,80 +1,159 @@
-// src/pages/Home.tsx
-import React from 'react';
-import { Container, Box, Typography, Stack, Paper, Avatar, IconButton } from '@mui/material';
-import { Pets, PregnantWoman, ChevronRight, NotificationsNone } from '@mui/icons-material';
+import React, { useState, useEffect } from 'react';
+import { Box, Typography, Button, Stack } from '@mui/material';
+import PetsIcon from '@mui/icons-material/Pets';
+import FavoriteIcon from '@mui/icons-material/Favorite';
+import { useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import PullToRefresh from 'react-simple-pull-to-refresh';
+import { getMyCattleAPI } from '../apis/apis';
+
+// Importing your existing dashboard components
 import StatCard from '../components/dashboard/StatCard';
 import ActionGrid from '../components/dashboard/ActionGrid';
-import { CURRENT_USER } from '../data/mockUsers';
+import { Preferences } from '@capacitor/preferences';
 
-const stats = [
-    { label: 'Total Herd', value: 45, icon: Pets, color: '#10B981' },
-    { label: 'Pregnant', value: 12, icon: PregnantWoman, color: '#F59E0B' },
-];
+interface CowSummary {
+    _id: string;
+    name: string;
+    breed: string;
+    currentStatus: string;
+    isSick: boolean;
+}
+
 
 const Home: React.FC = () => {
+    const navigate = useNavigate();
+
+    const [farmerName, setFarmerName] = useState<string>('');
+
+    const { data: cowsResponse, isLoading, refetch } = useQuery({
+        queryKey: ['cows'],
+        queryFn: getMyCattleAPI,
+    });
+
+    const handleRefresh = async () => {
+        await refetch();
+    };
+
+    const cows = cowsResponse?.data || [];
+
+    useEffect(() => {
+        const fetchUserData = async () => {
+            try {
+                // Load user name
+                const { value: userDataStr } = await Preferences.get({ key: 'user_data' });
+                if (userDataStr) {
+                    try {
+                        const userData = JSON.parse(userDataStr);
+                        if (userData?.name) setFarmerName(userData.name);
+                    } catch (e) {
+                        console.error("Failed to parse user data", e);
+                    }
+                }
+            } catch (err) {
+                console.error("Failed to load user data", err);
+            }
+        };
+        fetchUserData();
+    }, []);
+
+    if (isLoading) return null; // Avoid flash of zero-state while fetching
+
     return (
-        <Container maxWidth="sm" sx={{ px: 2, pb: 10, pt: 2 }}>
-            <Stack spacing={4}>
+        <PullToRefresh onRefresh={handleRefresh} pullingContent=""
+            maxPullDownDistance={100} resistance={2} backgroundColor="#F4F7F4">
+            <Box sx={{ p: 2, minHeight: 'calc(100vh - 80px)' }}>
+                {/* 1. Greeting Section */}
+                <Box sx={{ mb: 3 }}>
+                    <Typography variant="h5" sx={{ fontWeight: 'bold' }}>
+                        Welcome back{farmerName ? `, ${farmerName}` : ''}!
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                        Here is your herd overview for today.
+                    </Typography>
+                </Box>
 
-                {/* 1. APP-LIKE HEADER */}
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <Box>
-                        <Typography variant="body2" color="text.secondary" fontWeight={500}>
-                            {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'short' })}
-                        </Typography>
-                        <Typography variant="h5" fontWeight={800} color="text.primary">
-                            Hi, {CURRENT_USER.name.split(' ')[0]}
-                        </Typography>
+                {/* 2. Statistics Overview */}
+                <Stack direction="row" spacing={2} sx={{ mb: 4 }}>
+                    <Box sx={{ flex: 1 }}>
+                        <StatCard label="Total Cattle" value={cows.length} icon={PetsIcon} color="text.primary" />
                     </Box>
-                    <IconButton sx={{ bgcolor: 'white', border: '1px solid #eee' }}>
-                        <NotificationsNone />
-                    </IconButton>
-                </Box>
+                    <Box sx={{ flex: 1 }}>
+                        <StatCard label="Pregnant" value={cows.filter((c: CowSummary) => c.currentStatus === 'Pregnant').length} icon={FavoriteIcon} color="warning.main" />
+                    </Box>
+                </Stack>
 
-                {/* 2. STATS ROW */}
-                <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
-                    {stats.map((stat) => (
-                        <StatCard key={stat.label} {...stat} />
-                    ))}
-                </Box>
-
-                {/* 3. ACTIONS */}
+                {/* 3. Quick Actions */}
                 <ActionGrid />
 
-                {/* 4. RECENT ACTIVITY (Card Style) */}
-                <Box>
-                    <Typography variant="h6" sx={{ mb: 2, fontWeight: 700, px: 1 }}>
-                        Recent Activity
+                {/* 4. Dynamic Herd List (Zero-State vs Populated) */}
+                <Box sx={{ mb: 2 }}>
+                    <Typography variant="h6" sx={{ fontWeight: 'bold', mb: 2 }}>
+                        Your Herd
                     </Typography>
-                    <Paper
-                        elevation={0}
-                        sx={{
-                            p: 2,
-                            borderRadius: 3,
-                            border: '1px solid',
-                            borderColor: 'divider',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 2
-                        }}
-                    >
-                        <Avatar variant="rounded" sx={{ bgcolor: '#E0F2F1', color: '#00695C' }}>
-                            <Pets fontSize="small" />
-                        </Avatar>
-                        <Box sx={{ flexGrow: 1 }}>
-                            <Typography variant="subtitle2" fontWeight={700}>
-                                New Calf Registered
-                            </Typography>
-                            <Typography variant="caption" color="text.secondary">
-                                Tag #309 • Yesterday
-                            </Typography>
-                        </Box>
-                        <ChevronRight color="action" />
-                    </Paper>
-                </Box>
 
-            </Stack>
-        </Container>
+                    {cows.length === 0 ? (
+                        /* ZERO-STATE UI: Shown when there are no cows */
+                        <Box sx={{
+                            textAlign: 'center',
+                            py: 6,
+                            px: 2,
+                            bgcolor: 'background.paper',
+                            borderRadius: 4,
+                            boxShadow: '0px 4px 12px rgba(0,0,0,0.05)',
+                            border: '1px dashed',
+                            borderColor: 'grey.300'
+                        }}>
+                            <PetsIcon sx={{ fontSize: 60, color: 'grey.400', mb: 2 }} />
+                            <Typography variant="h6" color="text.secondary" sx={{ fontWeight: 'bold', mb: 1 }}>
+                                Welcome!
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary" sx={{ mb: 3, px: 2 }}>
+                                You have 0 registered cows. Tap the '+' button to add your first animal.
+                            </Typography>
+                            <Button
+                                variant="contained"
+                                color="primary"
+                                onClick={() => navigate('/add-cow')}
+                                sx={{ borderRadius: 2, px: 4, py: 1.5, fontWeight: 'bold' }}
+                            >
+                                + Register Cattle
+                            </Button>
+                        </Box>
+                    ) : (
+                        /* POPULATED STATE UI: Shown when cows exist */
+                        <Box>
+                            {cows.slice(0, 2).map((cow: CowSummary, index: number) => (
+                                <Box
+                                    key={index}
+                                    sx={{
+                                        p: 2,
+                                        mb: 2,
+                                        bgcolor: 'background.paper',
+                                        borderRadius: 2,
+                                        boxShadow: '0px 2px 8px rgba(0,0,0,0.05)',
+                                        cursor: 'pointer'
+                                    }}
+                                    onClick={() => navigate(`/profile/${cow._id}`)}
+                                >
+                                    <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>{cow.name}</Typography>
+                                    <Typography variant="body2" color="text.secondary">{cow.breed} • {cow.currentStatus}</Typography>
+                                </Box>
+                            ))}
+
+                            <Button
+                                fullWidth
+                                variant="outlined"
+                                onClick={() => navigate('/my-cows')}
+                                sx={{ mt: 2, borderRadius: 2 }}
+                            >
+                                View All Cattle
+                            </Button>
+                        </Box>
+                    )}
+                </Box>
+            </Box>
+        </PullToRefresh>
     );
 };
 

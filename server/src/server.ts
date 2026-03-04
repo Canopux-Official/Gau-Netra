@@ -3,23 +3,67 @@ dotenv.config();
 import connectDB from "./config/db";
 import express from "express";
 import cors from 'cors';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
+import authRoutes from './routes/auth';
+import cattleRoutes from './routes/cattle';
 
+// Check required prod variables
+if (!process.env.JWT_SECRET || !process.env.MONGO_URI) {
+  console.error("FATAL ERROR: Missing env secrets.");
+  process.exit(1);
+}
 const app = express();
-const port = process.env.PORT || 5000;
+// Enable proxy trust for GCP Load Balancing/Rate Limiting
+app.set('trust proxy', 1);
+const port = process.env.PORT || 2424;
+
+// Strict CORS Rules
 const corsOptions = {
-  origin: `${process.env.CLIENT_LINK}`,
+  origin: [
+    'http://localhost',
+    'capacitor://localhost',
+    'https://localhost',
+    process.env.CLIENT_LINK || ''
+  ],
   methods: "GET,HEAD,PUT,PATCH,POST,DELETE",
+  credentials: true,
 };
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+
+app.use(helmet());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(cors(corsOptions));
+
+// HTTP Request Logger
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url} | Origin: ${req.headers.origin} | IP: ${req.ip}`);
+  next();
+});
+
+// Auth Route Rate Limiter (100 req / 15min)
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  message: { success: false, message: 'Too many requests, please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 connectDB();
 
-app.get("/", (req, res) => {
-  res.send("Hello World!");
+app.use('/api/auth', authLimiter, authRoutes);
+app.use('/api/cattle', cattleRoutes);
+
+// GCP Healthcheck
+app.get('/health', (req, res) => {
+  res.status(200).send('OK');
 });
 
-app.listen(port, () => {
-  console.log(`Server is running at http://localhost:${port}`);
+app.get("/", (req, res) => {
+  res.send("Hello World! API running");
+});
+
+app.listen(Number(port), "0.0.0.0", () => {
+  console.log(`Server is running at http://0.0.0.0:${port}`);
 });

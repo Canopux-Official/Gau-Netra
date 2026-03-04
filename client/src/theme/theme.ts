@@ -13,7 +13,7 @@ const theme = createTheme({
             main: '#F59E0B', // Professional Amber
         },
         background: {
-            default: '#F3F4F6', // Cool gray (Modern app background)
+            default: '#F4F7F4', // Faint, premium green tint
             paper: '#FFFFFF',
         },
         text: {

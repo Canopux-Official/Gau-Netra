@@ -45,3 +45,8 @@ yarn.lock
 # Ignore any files ending with .cache
 *.cache
 seedDb.ts
+.vscode
+__pycache__
+venv
+chroma_data
+dist

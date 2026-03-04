@@ -2,20 +2,17 @@ import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IHealthLog extends Document {
     cattleId: mongoose.Types.ObjectId;
-    farmerId: mongoose.Types.ObjectId; // Redundant but good for query speed
+    farmerId: mongoose.Types.ObjectId;
     type: 'Weight' | 'Vaccination' | 'Insemination' | 'Treatment';
     date: Date;
-
-    // Dynamic payload based on type
     data: {
-        weight?: number;         // If type = Weight
-        vaccineName?: string;    // If type = Vaccination
+        weight?: number;
+        vaccineName?: string;
         batchNumber?: string;
         notes?: string;
         doctorName?: string;
     };
-
-    nextDueDate?: Date; // Reminder for next vaccine/checkup
+    nextDueDate?: Date;
 }
 
 const HealthLogSchema = new Schema<IHealthLog>({
