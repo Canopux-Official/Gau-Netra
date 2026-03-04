@@ -1,14 +1,21 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
-    Container, Paper, Typography, Box, Stepper, Step, StepLabel,
-    Button, TextField, MenuItem, Stack, IconButton, Divider, InputAdornment
+    Container, Paper, Typography, Box, Stepper, Step, StepButton,
+    Button, TextField, MenuItem, Stack, IconButton, Divider, InputAdornment,
+    Backdrop, CircularProgress, SwipeableDrawer, List, ListItem, ListItemButton,
+    ListItemIcon, ListItemText
 } from '@mui/material';
 import {
-    CameraAlt, ArrowBack, ArrowForward, CheckCircle,
-    QrCodeScanner, Edit
+    CameraAlt, ArrowForward, CheckCircle,
+    QrCodeScanner, Edit, PhotoLibrary
 } from '@mui/icons-material';
-import { useNavigate } from 'react-router-dom';
-import { useCamera } from '../hooks/useCamera'; // Import the hook
+import { useNavigate, useLocation } from 'react-router-dom';
+import { syncManager } from '../utils/syncManager';
+import { registerCowAPI } from '../apis/apis';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { App as CapacitorApp } from '@capacitor/app';
+import { HTML5CameraDialog } from '../components/HTML5CameraDialog';
+import type { CameraGuidanceType } from '../components/HTML5CameraDialog';
 
 // STEPS MAPPED TO YOUR WORKFLOW
 const steps = ['Basic Info', 'Lineage & Origin', 'Visual ID', 'Health & Stats', 'Review'];
@@ -34,6 +41,7 @@ interface CowFormData {
     healthStatus: string;
     productionStatus: string;
     // Photos
+    faceImage: string;
     muzzleImage: string;
     leftImage: string;
     rightImage: string;
@@ -141,84 +149,220 @@ const StepOrigin: React.FC<StepProps> = ({ formData, handleChange }) => (
 );
 
 // --- STEP 3: VISUAL ID (CAMERA) ---
-const PhotoCaptureBox = ({ label, currentImage, required = false, onCapture }: { label: string, currentImage?: string, required?: boolean, onCapture: (img: string) => void }) => {
-    const { takePhoto } = useCamera();
 
-    const handleClick = async () => {
-        const img = await takePhoto();
-        if (img) onCapture(img);
+interface SmartPhotoBoxProps {
+    label: string;
+    currentImage?: string;
+    required?: boolean;
+    guidanceType: CameraGuidanceType;
+    onCapture: (img: string) => void;
+}
+
+const SmartPhotoBox: React.FC<SmartPhotoBoxProps> = ({ label, currentImage, required = false, guidanceType, onCapture }) => {
+    const [drawerOpen, setDrawerOpen] = useState(false);
+    const [cameraOpen, setCameraOpen] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
+    const handleBoxClick = () => setDrawerOpen(true);
+
+    const handleTakePicture = () => {
+        setDrawerOpen(false);
+        // Small delay so the drawer closes smoothly before opening fullscreen camera
+        setTimeout(() => setCameraOpen(true), 200);
+    };
+
+    const handleGallery = () => {
+        setDrawerOpen(false);
+        setTimeout(() => fileInputRef.current?.click(), 200);
+    };
+
+    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const result = event.target?.result;
+                if (typeof result === 'string') {
+                    onCapture(result);
+                }
+            };
+            reader.readAsDataURL(file);
+        }
+        // Reset input so the same file can be re-selected
+        e.target.value = '';
     };
 
     return (
-        <Paper
-            elevation={0}
-            onClick={handleClick}
-            sx={{
-                bgcolor: '#F3F4F6', border: '2px dashed #CBD5E1', borderRadius: 3,
-                p: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                height: required ? 160 : 110, cursor: 'pointer', position: 'relative', overflow: 'hidden',
-                transition: '0.2s', '&:active': { transform: 'scale(0.98)' }
-            }}
-        >
-            {currentImage ? (
-                <img src={currentImage} alt={label} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-            ) : (
-                <>
-                    <CameraAlt color={required ? 'primary' : 'action'} sx={{ fontSize: 32, mb: 1 }} />
-                    <Typography variant="caption" fontWeight={600} align="center">{label}</Typography>
-                </>
-            )}
+        <>
+            {/* Hidden file input for gallery */}
+            <input
+                type="file"
+                accept="image/*"
+                ref={fileInputRef}
+                style={{ display: 'none' }}
+                onChange={handleFileChange}
+            />
 
-            {required && !currentImage && (
-                <Box sx={{ position: 'absolute', top: 0, right: 0, bgcolor: 'secondary.main', color: 'white', fontSize: 10, px: 1, borderBottomLeftRadius: 8 }}>
-                    AI REQUIRED
+            {/* HTML5 Camera Dialog */}
+            <HTML5CameraDialog
+                open={cameraOpen}
+                onClose={() => setCameraOpen(false)}
+                onCapture={(img) => { onCapture(img); setCameraOpen(false); }}
+                guidanceType={guidanceType}
+            />
+
+            {/* Source Picker Drawer */}
+            <SwipeableDrawer
+                anchor="bottom"
+                open={drawerOpen}
+                onClose={() => setDrawerOpen(false)}
+                onOpen={() => setDrawerOpen(true)}
+                PaperProps={{
+                    sx: {
+                        borderTopLeftRadius: 20,
+                        borderTopRightRadius: 20,
+                        pb: 3
+                    }
+                }}
+            >
+                {/* Drawer handle bar */}
+                <Box sx={{ display: 'flex', justifyContent: 'center', pt: 1.5, pb: 1 }}>
+                    <Box sx={{ width: 40, height: 4, borderRadius: 2, bgcolor: 'grey.300' }} />
                 </Box>
-            )}
-        </Paper>
+                <Typography variant="subtitle1" fontWeight={700} sx={{ px: 3, pb: 1 }}>
+                    {label}
+                </Typography>
+                <List disablePadding>
+                    <ListItem disablePadding>
+                        <ListItemButton onClick={handleTakePicture} sx={{ py: 1.5, px: 3 }}>
+                            <ListItemIcon sx={{ minWidth: 44 }}>
+                                <CameraAlt color="primary" />
+                            </ListItemIcon>
+                            <ListItemText
+                                primary="Take Picture"
+                                secondary="Use the camera to capture a live photo"
+                                primaryTypographyProps={{ fontWeight: 600 }}
+                            />
+                        </ListItemButton>
+                    </ListItem>
+                    <Divider variant="inset" component="li" />
+                    <ListItem disablePadding>
+                        <ListItemButton onClick={handleGallery} sx={{ py: 1.5, px: 3 }}>
+                            <ListItemIcon sx={{ minWidth: 44 }}>
+                                <PhotoLibrary color="action" />
+                            </ListItemIcon>
+                            <ListItemText
+                                primary="From Gallery"
+                                secondary="Choose an existing photo from your device"
+                                primaryTypographyProps={{ fontWeight: 600 }}
+                            />
+                        </ListItemButton>
+                    </ListItem>
+                </List>
+            </SwipeableDrawer>
+
+            {/* Photo Placeholder Card */}
+            <Paper
+                elevation={0}
+                onClick={handleBoxClick}
+                sx={{
+                    bgcolor: '#F3F4F6', border: '2px dashed #CBD5E1', borderRadius: 1,
+                    p: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                    height: required ? 160 : 110, cursor: 'pointer', position: 'relative', overflow: 'hidden',
+                    transition: '0.2s', '&:active': { transform: 'scale(0.98)' }
+                }}
+            >
+                {currentImage ? (
+                    <>
+                        <img src={currentImage} alt={label} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        <Box sx={{
+                            position: 'absolute', top: 0, left: 0, right: 0,
+                            bgcolor: 'rgba(0,0,0,0.5)', color: 'white',
+                            py: 0.5, px: 1, display: 'flex', alignItems: 'center', justifyContent: 'center'
+                        }}>
+                            <Typography variant="caption" fontWeight="bold" noWrap>{label}</Typography>
+                        </Box>
+                        <Box sx={{
+                            position: 'absolute', bottom: 0, left: 0, right: 0,
+                            bgcolor: 'rgba(0,0,0,0.6)', color: 'white',
+                            py: 0.5, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5
+                        }}>
+                            <CameraAlt sx={{ fontSize: 14 }} />
+                            <Typography variant="caption" fontWeight="bold">Retake</Typography>
+                        </Box>
+                    </>
+                ) : (
+                    <>
+                        <CameraAlt color={required ? 'primary' : 'action'} sx={{ fontSize: 32, mb: 1 }} />
+                        <Typography variant="caption" fontWeight={600} align="center">{label}</Typography>
+                    </>
+                )}
+
+                {required && !currentImage && (
+                    <Box sx={{ position: 'absolute', top: 0, right: 0, bgcolor: 'secondary.main', color: 'white', fontSize: 10, px: 1, borderBottomLeftRadius: 8 }}>
+                        AI REQUIRED
+                    </Box>
+                )}
+            </Paper>
+        </>
     );
 };
 
 const StepVisual: React.FC<StepProps> = ({ formData, handlePhotoCapture }) => (
     <Stack spacing={3}>
         <Typography variant="body2" color="text.secondary">
-            Capture clear photos for the AI Model to identify this cow later.
+            Capture clear photos for the AI Model to identify this cow later. All images are mandatory.
         </Typography>
 
         <Typography variant="subtitle2" fontWeight="bold">1. PRIMARY IDENTIFIER</Typography>
-        <PhotoCaptureBox
-            label="Muzzle (Nose Print)"
-            required
-            currentImage={formData.muzzleImage}
-            onCapture={(img) => handlePhotoCapture?.('muzzleImage', img)}
-        />
+        <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
+            <SmartPhotoBox
+                label="Face Profile"
+                required={true}
+                guidanceType="face"
+                currentImage={formData.faceImage}
+                onCapture={(img) => handlePhotoCapture?.('faceImage', img)}
+            />
+            <SmartPhotoBox
+                label="Muzzle (Nose Print)"
+                required={true}
+                guidanceType="muzzle"
+                currentImage={formData.muzzleImage}
+                onCapture={(img) => handlePhotoCapture?.('muzzleImage', img)}
+            />
+        </Box>
 
         <Typography variant="subtitle2" fontWeight="bold">2. BODY ANGLES</Typography>
         <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
-            <PhotoCaptureBox
+            <SmartPhotoBox
                 label="Left Profile"
+                required={true}
+                guidanceType="left"
                 currentImage={formData.leftImage}
                 onCapture={(img) => handlePhotoCapture?.('leftImage', img)}
             />
-            <PhotoCaptureBox
+            <SmartPhotoBox
                 label="Right Profile"
+                required={true}
+                guidanceType="right"
                 currentImage={formData.rightImage}
                 onCapture={(img) => handlePhotoCapture?.('rightImage', img)}
             />
-            <PhotoCaptureBox
+            <SmartPhotoBox
                 label="Back View"
+                required={true}
+                guidanceType="back"
                 currentImage={formData.backImage}
                 onCapture={(img) => handlePhotoCapture?.('backImage', img)}
             />
-            <PhotoCaptureBox
+            <SmartPhotoBox
                 label="Tail / Udders"
+                required={true}
+                guidanceType="tail"
                 currentImage={formData.tailImage}
                 onCapture={(img) => handlePhotoCapture?.('tailImage', img)}
             />
         </Box>
-
-        <Button variant="outlined" startIcon={<CameraAlt />}>
-            Launch 3D Scanner (Optional)
-        </Button>
     </Stack>
 );
 
@@ -257,34 +401,63 @@ const StepReview: React.FC<StepReviewProps> = ({ formData, setActiveStep }) => (
     <Stack spacing={2}>
         <Paper elevation={0} sx={{ bgcolor: '#F9FAFB', p: 2, borderRadius: 2 }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                <Typography variant="subtitle2" color="text.secondary">IDENTITY</Typography>
+                <Typography variant="subtitle2" color="primary" fontWeight="bold">BASIC IDENTIFICATION</Typography>
                 <IconButton size="small" onClick={() => setActiveStep(0)}><Edit fontSize="small" /></IconButton>
             </Box>
-            <Typography variant="body1" fontWeight="bold">{formData.tagNo || 'No Tag'}</Typography>
-            <Typography variant="body2">{formData.breed} {formData.species} • {formData.sex}</Typography>
+            <Typography variant="body2"><b>Tag No:</b> {formData.tagNo || 'None'}</Typography>
+            <Typography variant="body2"><b>Name:</b> {formData.name || 'None'}</Typography>
+            <Typography variant="body2"><b>Species:</b> {formData.species}</Typography>
+            <Typography variant="body2"><b>Sex:</b> {formData.sex}</Typography>
+            <Typography variant="body2"><b>Breed:</b> {formData.breed || 'None'}</Typography>
+            <Typography variant="body2"><b>DOB:</b> {formData.dob || 'None'} ({formData.ageMonths ? `${formData.ageMonths}m` : 'N/A'})</Typography>
         </Paper>
 
         <Paper elevation={0} sx={{ bgcolor: '#F9FAFB', p: 2, borderRadius: 2 }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                <Typography variant="subtitle2" color="text.secondary">PHOTOS</Typography>
+                <Typography variant="subtitle2" color="primary" fontWeight="bold">LINEAGE & ORIGIN</Typography>
+                <IconButton size="small" onClick={() => setActiveStep(1)}><Edit fontSize="small" /></IconButton>
+            </Box>
+            <Typography variant="body2"><b>Source:</b> {formData.source}</Typography>
+            {formData.source === 'Purchase' && (
+                <>
+                    <Typography variant="body2"><b>Purchase Date:</b> {formData.purchaseDate || 'None'}</Typography>
+                    <Typography variant="body2"><b>Price:</b> ₹{formData.purchasePrice || '0'}</Typography>
+                </>
+            )}
+            <Typography variant="body2"><b>Sire Tag:</b> {formData.sireTag || 'None'}</Typography>
+            <Typography variant="body2"><b>Dam Tag:</b> {formData.damTag || 'None'}</Typography>
+            <Typography variant="body2"><b>Birth Weight:</b> {formData.birthWeight || 'None'} kg</Typography>
+            <Typography variant="body2"><b>Mother WT at Calving:</b> {formData.motherWeightAtCalving || 'None'} kg</Typography>
+        </Paper>
+
+        <Paper elevation={0} sx={{ bgcolor: '#F9FAFB', p: 2, borderRadius: 2 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                <Typography variant="subtitle2" color="primary" fontWeight="bold">PHOTOS / IDENTIFIERS</Typography>
                 <IconButton size="small" onClick={() => setActiveStep(2)}><Edit fontSize="small" /></IconButton>
             </Box>
-            <Typography variant="body2">Muzzle: {formData.muzzleImage ? 'Captured ✅' : 'Pending ❌'}</Typography>
-            <Typography variant="body2">Angles: {formData.leftImage ? 'Captured ✅' : 'Pending ❌'}</Typography>
+            <Typography variant="body2"><b>Face Profile:</b> {formData.faceImage ? 'Captured ✅' : 'Pending ❌'}</Typography>
+            <Typography variant="body2"><b>Muzzle:</b> {formData.muzzleImage ? 'Captured ✅' : 'Pending ❌'}</Typography>
+            <Typography variant="body2"><b>Left Profile:</b> {formData.leftImage ? 'Captured ✅' : 'Pending ❌'}</Typography>
+            <Typography variant="body2"><b>Right Profile:</b> {formData.rightImage ? 'Captured ✅' : 'Pending ❌'}</Typography>
+            <Typography variant="body2"><b>Back View:</b> {formData.backImage ? 'Captured ✅' : 'Pending ❌'}</Typography>
+            <Typography variant="body2"><b>Tail / Udders:</b> {formData.tailImage ? 'Captured ✅' : 'Pending ❌'}</Typography>
         </Paper>
 
         <Paper elevation={0} sx={{ bgcolor: '#F9FAFB', p: 2, borderRadius: 2 }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                <Typography variant="subtitle2" color="text.secondary">STATS</Typography>
+                <Typography variant="subtitle2" color="primary" fontWeight="bold">HEALTH & STATS</Typography>
                 <IconButton size="small" onClick={() => setActiveStep(3)}><Edit fontSize="small" /></IconButton>
             </Box>
-            <Typography variant="body2">Weight: {formData.currentWeight} kg</Typography>
-            <Typography variant="body2">Status: {formData.productionStatus}</Typography>
+            <Typography variant="body2"><b>Current Weight:</b> {formData.currentWeight || 'None'} kg</Typography>
+            <Typography variant="body2"><b>Growth Status:</b> {formData.growthStatus}</Typography>
+            <Typography variant="body2"><b>Reproduction:</b> {formData.productionStatus}</Typography>
+            <Typography variant="body2"><b>Condition Status:</b> {formData.healthStatus}</Typography>
+            <Typography variant="body2"><b>Body Score (BCS):</b> {formData.bodyConditionScore || 'None'}</Typography>
         </Paper>
 
         <Box sx={{ textAlign: 'center', mt: 2 }}>
             <Typography variant="caption" color="text.secondary">
-                By clicking submit, this data and the muzzle photos will be uploaded to the Gau-Netra AI Server.
+                By clicking submit, this data and the metadata will be uploaded to the Gau-Netra AI Server.
             </Typography>
         </Box>
     </Stack>
@@ -292,16 +465,39 @@ const StepReview: React.FC<StepReviewProps> = ({ formData, setActiveStep }) => (
 
 const AddCow: React.FC = () => {
     const navigate = useNavigate();
-    const [activeStep, setActiveStep] = useState(0);
+    const location = useLocation();
+    const offlineDraft = location.state?.offlineDraft;
 
-    const [formData, setFormData] = useState<CowFormData>({
-        tagNo: '', name: '', species: 'Cow', breed: '', sex: 'Female', dob: '', ageMonths: '',
-        source: 'Home Born', purchaseDate: '', purchasePrice: '', sireTag: '', damTag: '',
-        birthWeight: '', motherWeightAtCalving: '', bodyConditionScore: '',
-        currentWeight: '', growthStatus: 'Optimum', healthStatus: 'Healthy', productionStatus: 'Milking',
-        // Photos
-        muzzleImage: '', leftImage: '', rightImage: '', backImage: '', tailImage: ''
-    });
+    const [activeStep, setActiveStep] = useState(0);
+    const scrollRef = useRef<HTMLDivElement>(null);
+    const [isSubmitting, setIsSubmitting] = useState(false);
+
+    useEffect(() => {
+        if (scrollRef.current) {
+            setTimeout(() => {
+                if (scrollRef.current) {
+                    scrollRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+                    scrollRef.current.scrollTop = 0;
+                }
+                const mainEl = document.querySelector('main');
+                if (mainEl) {
+                    mainEl.scrollTo({ top: 0, behavior: 'smooth' });
+                    mainEl.scrollTop = 0;
+                }
+            }, 50);
+        }
+    }, [activeStep]);
+
+    const [formData, setFormData] = useState<CowFormData>(
+        offlineDraft ? offlineDraft : {
+            tagNo: '', name: '', species: 'Cow', breed: '', sex: 'Female', dob: '', ageMonths: '',
+            source: 'Home Born', purchaseDate: '', purchasePrice: '', sireTag: '', damTag: '',
+            birthWeight: '', motherWeightAtCalving: '', bodyConditionScore: '',
+            currentWeight: '', growthStatus: 'Optimum', healthStatus: 'Healthy', productionStatus: 'Milking',
+            // Photos
+            faceImage: '', muzzleImage: '', leftImage: '', rightImage: '', backImage: '', tailImage: ''
+        }
+    );
 
     const handleChange = (field: string) => (e: React.ChangeEvent<HTMLInputElement>) => {
         const value = e.target.value;
@@ -321,6 +517,80 @@ const AddCow: React.FC = () => {
         });
     };
 
+    const queryClient = useQueryClient();
+
+    const mutation = useMutation({
+        mutationFn: (data: CowFormData) => registerCowAPI(data),
+        retry: (failureCount, error: Error & { responseStatus?: number }) => {
+            // Do not retry client/validation errors (4xx)
+            if (error.responseStatus && error.responseStatus >= 400 && error.responseStatus < 500) return false;
+            return failureCount < 2; // Retry network or 5xx errors
+        },
+        onSuccess: async () => {
+            // If this was an offline draft being edited, remove it from offline store now
+            if (offlineDraft && offlineDraft.id) {
+                await syncManager.removePendingCow(offlineDraft.id);
+            }
+
+            // Invalidate the 'cows' query to instantly fetch updated lists on Home / MyCows
+            queryClient.invalidateQueries({ queryKey: ['cows'] });
+            alert('Saved online successfully!');
+            navigate('/home');
+        },
+        onError: async (err: Error & { responseStatus?: number }, variables) => {
+            // Check if it is a client/validation error (e.g. 400, 422, etc.)
+            const isValidationError = err.responseStatus && err.responseStatus >= 400 && err.responseStatus < 500;
+
+            if (isValidationError) {
+                console.warn('Validation error from server', err);
+                alert(`Validation Error: ${err.message}. Please correct the information and try again.`);
+                return; // Stop here, do not save locally, stay on the form
+            }
+
+            console.error('Failed to save cow on server after retries', err);
+            alert(`Server error: ${err.message || 'Please try again'}. Saving locally to sync later.`);
+            // Fallback to storing locally
+            setIsSubmitting(true);
+            try {
+                // Remove the old drafted version first before saving the new updated offline draft
+                if (offlineDraft && offlineDraft.id) {
+                    await syncManager.removePendingCow(offlineDraft.id);
+                }
+
+                await syncManager.savePendingCow(variables);
+                navigate('/home');
+            } catch (localErr) {
+                console.error('Failed to save locally as fallback', localErr);
+                alert('Also failed to save locally.');
+            } finally {
+                setIsSubmitting(false);
+            }
+        },
+    });
+
+    const handleSubmit = async () => {
+        if (!navigator.onLine) {
+            setIsSubmitting(true);
+            try {
+                // If editing an existing offline draft, clean up the old one first
+                if (offlineDraft && offlineDraft.id) {
+                    await syncManager.removePendingCow(offlineDraft.id);
+                }
+
+                await syncManager.savePendingCow(formData);
+                alert('No internet connection. Saved locally! Will sync when online.');
+                navigate('/home');
+            } catch (err) {
+                console.error('Failed to save locally', err);
+                alert('Failed to save locally.');
+            } finally {
+                setIsSubmitting(false);
+            }
+        } else {
+            mutation.mutate(formData);
+        }
+    };
+
     const handlePhotoCapture = (field: keyof CowFormData, img: string) => {
         setFormData(prev => ({ ...prev, [field]: img }));
     };
@@ -328,37 +598,143 @@ const AddCow: React.FC = () => {
     const handleNext = () => setActiveStep((prev) => prev + 1);
     const handleBack = () => setActiveStep((prev) => prev - 1);
 
+    const handleCancelRequest = useCallback(() => {
+        const confirmLeave = window.confirm('You are currently registering a new cow. If you leave, your progress will be lost. Are you sure you want to exit?');
+        if (confirmLeave) {
+            navigate('/home', { replace: true });
+        }
+    }, [navigate]);
+
+    // Hardware Back Button Interception
+    useEffect(() => {
+        const backListener = CapacitorApp.addListener('backButton', () => {
+            if (activeStep > 0) {
+                handleBack();
+            } else {
+                handleCancelRequest();
+            }
+        });
+
+        return () => {
+            backListener.then(listener => listener.remove());
+        };
+    }, [activeStep, handleCancelRequest]);
+
     return (
-        <Container maxWidth="sm" sx={{ py: 2, pb: 15 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                <IconButton onClick={() => navigate('/')} sx={{ mr: 1, border: '1px solid #E5E7EB' }}>
-                    <ArrowBack />
-                </IconButton>
-                <Typography variant="h6" fontWeight={800}>New Registration</Typography>
+        <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', bgcolor: 'background.default' }}>
+            <Backdrop
+                sx={{ color: '#fff', zIndex: (theme) => theme.zIndex.drawer + 2, display: 'flex', flexDirection: 'column', gap: 2 }}
+                open={isSubmitting || mutation.isPending}
+            >
+                <CircularProgress color="inherit" />
+                <Typography variant="h6" fontWeight={600} align="center">
+                    Registering Cow...<br />Please wait
+                </Typography>
+            </Backdrop>
+
+            {/* FIXED TOP HEADER */}
+            <Box sx={{
+                pt: 'env(safe-area-inset-top, 0px)',
+                bgcolor: 'white',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.05)',
+                zIndex: 1100
+            }}>
+                <Container maxWidth="sm" sx={{ pt: 0.5, pb: 1 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 0.5 }}>
+                        <Typography variant="subtitle1" fontWeight={800}>New Registration</Typography>
+                    </Box>
+
+                    {/* FIXED STEPPER */}
+                    <Stepper nonLinear activeStep={activeStep} alternativeLabel sx={{ mb: 0.5 }}>
+                        {steps.map((label, index) => (
+                            <Step key={label} completed={activeStep > index}>
+                                <StepButton
+                                    onClick={() => setActiveStep(index)}
+                                    icon={<Box sx={{
+                                        width: 24, height: 24, borderRadius: '50%',
+                                        bgcolor: activeStep === index ? 'primary.main' : (activeStep > index ? 'primary.main' : 'grey.400'),
+                                        color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        fontSize: '0.75rem', fontWeight: 'bold'
+                                    }}>{index + 1}</Box>}
+                                    sx={{ '& .MuiStepLabel-label': { fontSize: '0.65rem' } }}
+                                >
+                                    {label}
+                                </StepButton>
+                            </Step>
+                        ))}
+                    </Stepper>
+
+                    {/* COMPACT TOP NAVIGATION */}
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 1, px: 2 }}>
+                        <Button
+                            size="small"
+                            disabled={activeStep === 0 || isSubmitting}
+                            onClick={handleBack}
+                            sx={{ color: 'text.secondary', fontWeight: 600, fontSize: '0.7rem', px: 1.5, py: 0.5, borderRadius: 4, bgcolor: '#F3F4F6', '&:hover': { bgcolor: '#E5E7EB' } }}
+                        >
+                            Back
+                        </Button>
+                        <Button
+                            size="small"
+                            variant="contained"
+                            disabled={isSubmitting}
+                            onClick={activeStep === steps.length - 1 ? handleSubmit : handleNext}
+                            endIcon={activeStep === steps.length - 1 ? <CheckCircle sx={{ fontSize: '14px !important' }} /> : <ArrowForward sx={{ fontSize: '14px !important' }} />}
+                            sx={{ fontWeight: 700, fontSize: '0.7rem', px: 1.5, py: 0.5, borderRadius: 4, boxShadow: 'none' }}
+                        >
+                            {mutation.isPending || isSubmitting ? 'Wait..' : (activeStep === steps.length - 1 ? 'Submit' : 'Next')}
+                        </Button>
+                    </Box>
+                </Container>
             </Box>
 
-            <Stepper activeStep={activeStep} alternativeLabel sx={{ mb: 4 }}>
-                {steps.map((label) => (
-                    <Step key={label}><StepLabel>{label}</StepLabel></Step>
-                ))}
-            </Stepper>
+            {/* SCROLLABLE FORM BODY */}
+            <Box ref={scrollRef} sx={{ flexGrow: 1, overflowY: 'auto', p: 1, pb: 4 }}>
+                <Container maxWidth="sm">
+                    <Paper elevation={0} sx={{ p: 2.5, border: '1px solid #E5E7EB', borderRadius: 2, mb: 3, bgcolor: 'white' }}>
+                        {activeStep === 0 && <StepBasic formData={formData} handleChange={handleChange} />}
+                        {activeStep === 1 && <StepOrigin formData={formData} handleChange={handleChange} />}
+                        {activeStep === 2 && <StepVisual formData={formData} handleChange={handleChange} handlePhotoCapture={handlePhotoCapture} />}
+                        {activeStep === 3 && <StepStats formData={formData} handleChange={handleChange} />}
+                        {activeStep === 4 && <StepReview formData={formData} setActiveStep={setActiveStep} />}
+                    </Paper>
 
-            <Paper elevation={0} sx={{ p: 2, border: '1px solid #E5E7EB', borderRadius: 3, minHeight: 400 }}>
-                {activeStep === 0 && <StepBasic formData={formData} handleChange={handleChange} />}
-                {activeStep === 1 && <StepOrigin formData={formData} handleChange={handleChange} />}
-                {activeStep === 2 && <StepVisual formData={formData} handleChange={handleChange} handlePhotoCapture={handlePhotoCapture} />}
-                {activeStep === 3 && <StepStats formData={formData} handleChange={handleChange} />}
-                {activeStep === 4 && <StepReview formData={formData} setActiveStep={setActiveStep} />}
-            </Paper>
-
-            <Paper elevation={12} sx={{ position: 'fixed', bottom: 0, left: 0, right: 0, p: 2, bgcolor: 'white', zIndex: 1300, borderTop: '1px solid #E5E7EB', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Button disabled={activeStep === 0} onClick={handleBack} sx={{ color: 'text.secondary', fontWeight: 600 }}>Back</Button>
-                <Typography variant="caption" fontWeight="bold" color="text.secondary">Step {activeStep + 1} of {steps.length}</Typography>
-                <Button variant="contained" onClick={activeStep === steps.length - 1 ? () => alert("Saved!") : handleNext} endIcon={activeStep === steps.length - 1 ? <CheckCircle /> : <ArrowForward />} sx={{ px: 4, borderRadius: 4, boxShadow: '0 4px 12px rgba(46, 125, 50, 0.3)' }}>
-                    {activeStep === steps.length - 1 ? 'Submit' : 'Next'}
-                </Button>
-            </Paper>
-        </Container>
+                    {/* INLINE BOTTOM NAVIGATION */}
+                    <Box sx={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        mb: 4
+                    }}>
+                        <Button
+                            color="error"
+                            onClick={handleCancelRequest}
+                            sx={{ fontWeight: 600, minWidth: 'auto', px: 2 }}
+                        >
+                            Cancel
+                        </Button>
+                        <Box sx={{ display: 'flex', gap: 1 }}>
+                            <Button
+                                disabled={activeStep === 0 || isSubmitting}
+                                onClick={handleBack}
+                                sx={{ color: 'text.secondary', fontWeight: 600, bgcolor: '#F3F4F6', '&:hover': { bgcolor: '#E5E7EB' }, borderRadius: 6, px: 3 }}
+                            >
+                                Back
+                            </Button>
+                            <Button
+                                variant="contained"
+                                disabled={isSubmitting}
+                                onClick={activeStep === steps.length - 1 ? handleSubmit : handleNext}
+                                endIcon={activeStep === steps.length - 1 ? <CheckCircle /> : <ArrowForward />}
+                                sx={{ borderRadius: 6, px: 4, boxShadow: '0 4px 12px rgba(46, 125, 50, 0.3)', fontWeight: 700, py: 1.5 }}
+                            >
+                                {mutation.isPending || isSubmitting ? 'Wait..' : (activeStep === steps.length - 1 ? 'Submit' : 'Next')}
+                            </Button>
+                        </Box>
+                    </Box>
+                </Container>
+            </Box>
+        </Box>
     );
 };
 

@@ -10,7 +10,7 @@ export const useCamera = () => {
                 quality: 90,
                 allowEditing: false,
                 resultType: CameraResultType.Base64,
-                source: CameraSource.Camera
+                source: CameraSource.Prompt
             });
 
             const imageUrl = `data:image/jpeg;base64,${image.base64String}`;

@@ -20,14 +20,16 @@ const ActionGrid: React.FC = () => {
 
             <Box sx={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(3, 1fr)', // 3 columns for better density
+                gridTemplateColumns: 'repeat(3, 1fr)',
                 gap: 2
             }}>
                 {actions.map((action) => (
                     <Paper
                         key={action.label}
                         onClick={() => {
-                            if (action.label === 'Register New') navigate('/add');
+                            if (action.label === 'Register New') navigate('/add-cow');
+                            if (action.label === 'Scan Cow') navigate('/search');
+                            if (action.label === 'Call Vet') alert('Calling Vet Helpline...');
                         }}
                         elevation={0}
                         sx={{
@@ -37,26 +39,29 @@ const ActionGrid: React.FC = () => {
                             alignItems: 'center',
                             justifyContent: 'center',
                             cursor: 'pointer',
-                            bgcolor: 'transparent', // Transparent background to look like app icons
-                            transition: 'transform 0.2s',
-                            '&:active': { transform: 'scale(0.95)' },
+                            bgcolor: 'background.paper',
+                            borderRadius: 4,
+                            boxShadow: '0 2px 10px rgba(0,0,0,0.03)',
+                            border: '1px solid',
+                            borderColor: 'grey.100',
+                            transition: 'all 0.2s ease',
+                            '&:active': { transform: 'scale(0.95)', bgcolor: 'grey.50' },
                         }}
                     >
                         {/* The "App Icon" Bubble */}
                         <Avatar
                             sx={{
-                                width: 64,
-                                height: 64,
+                                width: 56,
+                                height: 56,
                                 bgcolor: action.bg,
                                 color: action.color,
                                 mb: 1.5,
-                                boxShadow: '0 4px 12px rgba(0,0,0,0.05)'
                             }}
                         >
-                            <action.icon sx={{ fontSize: 30 }} />
+                            <action.icon sx={{ fontSize: 26 }} />
                         </Avatar>
 
-                        <Typography variant="caption" fontWeight={600} align="center" sx={{ color: 'text.secondary', lineHeight: 1.2 }}>
+                        <Typography variant="caption" fontWeight={700} align="center" sx={{ color: 'text.primary', lineHeight: 1.2 }}>
                             {action.label}
                         </Typography>
                     </Paper>

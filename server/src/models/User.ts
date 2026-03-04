@@ -4,22 +4,22 @@ export interface IUser extends Document {
     name: string;
     role: 'farmer' | 'collector' | 'admin';
     contact: {
-        phone: string;      // Primary login for Farmer
-        email?: string;     // Optional for Farmer, Required for Collector
+        phone: string;
+        email?: string;
     };
     auth: {
-        password?: string;  // Only for Collectors/Admins
-        otpSession?: string; // For Farmers
+        password?: string;
+        otpSession?: string;
     };
-    // Official details (from your form)
     location: {
         state: string;
         district: string;
         village: string;
         pincode: string;
     };
-    organization?: string; // For Data Collectors (e.g., "OCAC")
-    aadharHash?: string;   // Store hashed Aadhar for privacy
+    organization?: string;
+    aadharHash?: string;
+    cows: mongoose.Types.ObjectId[];
     createdAt: Date;
 }
 
@@ -35,7 +35,7 @@ const UserSchema = new Schema<IUser>({
         email: { type: String }
     },
     auth: {
-        password: { type: String, select: false }, // Hide by default
+        password: { type: String, select: false },
         otpSession: { type: String, select: false }
     },
     location: {
@@ -45,7 +45,8 @@ const UserSchema = new Schema<IUser>({
         pincode: { type: String }
     },
     organization: String,
-    aadharHash: String, // Never store raw Aadhar
+    aadharHash: String,
+    cows: [{ type: Schema.Types.ObjectId, ref: 'Cattle' }]
 }, { timestamps: true });
 
 export const User = mongoose.model<IUser>('User', UserSchema);
