@@ -13,7 +13,10 @@ dotenv.config();
 
 const CSV_FILE_PATH = './location.csv';
 
-// Helper to open OS native file explorer
+/* ==========================================
+   HELPERS
+   ========================================== */
+
 const openFileExplorer = (promptText: string): string => {
     const platform = os.platform();
     let command = '';
@@ -30,18 +33,13 @@ const openFileExplorer = (promptText: string): string => {
         }
 
         const result = execSync(command, { encoding: 'utf8' }).trim();
-
-        if (!result) {
-            throw new Error('Dialog closed without selection.');
-        }
-
+        if (!result) throw new Error('Dialog closed without selection.');
         return result;
     } catch (error) {
         throw new Error('File selection cancelled or failed.');
     }
 };
 
-// Helper to convert local image file to base64
 const convertToBase64 = (filePath: string): string => {
     try {
         const fileData = fs.readFileSync(filePath);
@@ -52,7 +50,6 @@ const convertToBase64 = (filePath: string): string => {
     }
 };
 
-// Random data generators for cattle
 const randomSpecies = () => Math.random() > 0.5 ? 'Cow' : 'Buffalo';
 const randomSex = () => {
     const r = Math.random();
@@ -66,6 +63,10 @@ const randomStatus = () => {
 };
 const randomSource = () => Math.random() > 0.5 ? 'Home Born' : 'Purchase';
 
+/* ==========================================
+   MAIN SEED FUNCTION
+   ========================================== */
+
 async function seedDatabase() {
     const MONGO_URI = process.env.MONGO_URI;
 
@@ -78,12 +79,20 @@ async function seedDatabase() {
         await mongoose.connect(MONGO_URI);
         console.log('✅ Connected to MongoDB.');
 
-        /* ==========================================
-           1. LOCATION SEEDING
-           ========================================== */
-        await Location.deleteMany({});
-        console.log('🗑️ Cleared existing location data.');
+        /* ------------------------------------------
+           1. FULL CLEANUP
+           ------------------------------------------ */
+        console.log('🧹 Clearing all existing data (Locations, Users, Cattle)...');
+        await Promise.all([
+            Location.deleteMany({}),
+            User.deleteMany({}),
+            Cattle.deleteMany({})
+        ]);
+        console.log('🗑️  Database cleared.');
 
+        /* ------------------------------------------
+           2. LOCATION SEEDING (FROM CSV)
+           ------------------------------------------ */
         const locations: any[] = [];
         let rowCount = 0;
 
@@ -93,11 +102,7 @@ async function seedDatabase() {
                     mapHeaders: ({ header }) => header.trim().replace(/^[\uFEFF\xEF\xBB\xBF]+/, '')
                 }))
                 .on('data', (row) => {
-                    if (rowCount === 0) {
-                        console.log('🔍 First row headers detected as:', Object.keys(row));
-                    }
                     rowCount++;
-
                     const state = row['State Name'] || row['State'] || row['state'];
                     const district = row['District Name'] || row['District'] || row['district'];
                     const block = row['Block Name'] || row['Block'] || row['block'];
@@ -113,105 +118,61 @@ async function seedDatabase() {
                     }
                 })
                 .on('end', async () => {
-                    console.log(`📊 Parsed ${locations.length} villages out of ${rowCount} rows.`);
-
-                    if (locations.length === 0) {
-                        console.log('⚠️ No valid rows found. Please check the header log above.');
-                        await mongoose.disconnect();
-                        process.exit(1);
-                    }
-
-                    console.log('Starting batch insert for locations...');
+                    console.log(`📊 Parsed ${locations.length} villages. Starting batch insert...`);
                     const BATCH_SIZE = 1000;
                     for (let i = 0; i < locations.length; i += BATCH_SIZE) {
                         const batch = locations.slice(i, i + BATCH_SIZE);
                         await Location.insertMany(batch);
-                        console.log(`⏳ Inserted batch ${i} to ${i + batch.length}`);
                     }
                     console.log('✅ Location seeding completed!');
                     resolve();
                 })
-                .on('error', (error) => {
-                    console.error('❌ Error reading the CSV file:', error);
-                    reject(error);
-                });
+                .on('error', reject);
         });
 
-        /* ==========================================
-           2. SEED SPECIFIC USER
-           ========================================== */
-        const farmerPhone = '1234567890';
-        let farmer = await User.findOne({ 'contact.phone': farmerPhone });
+        /* ------------------------------------------
+           3. CREATE FRESH USER
+           ------------------------------------------ */
+        const farmer = new User({
+            name: 'Archit Mishra',
+            role: 'farmer',
+            contact: { phone: '1234567890' },
+            location: {
+                state: 'Odisha',
+                district: 'Koraput',
+                block: 'Semiliguda',
+                village: 'Sunabera',
+                pincode: '763002'
+            }
+        });
+        await farmer.save();
+        console.log(`✅ Created fresh user: ${farmer.name}`);
 
-        if (!farmer) {
-            farmer = new User({
-                name: 'Archit Mishra',
-                role: 'farmer',
-                contact: { phone: farmerPhone },
-                location: {
-                    state: 'Odisha',
-                    district: 'Koraput',
-                    block: 'Semiliguda',
-                    village: 'Sunabera',
-                    pincode: '763002'
-                }
-            });
-            await farmer.save();
-            console.log(`✅ Created user: ${farmer.name}`);
-        } else {
-            console.log(`ℹ️ User ${farmer.name} already exists. Using existing ID.`);
-        }
-
-        /* ==========================================
-           3. SEED 12 COWS & REPLICATE ENDPOINT LOGIC
-           ========================================== */
-        console.log('\n🐄 Starting Cow Registration Process (12 Cows total)...');
+        /* ------------------------------------------
+           4. SEED 12 CATTLE
+           ------------------------------------------ */
+        console.log('\n🐄 Starting Cattle Registration (12 total)...');
 
         for (let i = 1; i <= 12; i++) {
-            console.log(`\n-----------------------------------`);
-            console.log(`🐮 Registering Cow ${i} of 12`);
-            console.log(`-----------------------------------`);
+            console.log(`\n[${i}/12] Select images for Cattle...`);
 
             let muzzleImageBase64 = '';
             let faceImageBase64 = '';
 
-            // Prompt for images using File Explorer
-            while (true) {
-                try {
-                    console.log('📂 Opening file explorer for MUZZLE image...');
-                    const muzzlePath = openFileExplorer(`Select MUZZLE Image for Cow ${i}`);
-                    muzzleImageBase64 = convertToBase64(muzzlePath);
-                    console.log(`✅ Selected Muzzle: ${muzzlePath}`);
+            try {
+                const muzzlePath = openFileExplorer(`Select MUZZLE Image for Cow ${i}`);
+                muzzleImageBase64 = convertToBase64(muzzlePath);
 
-                    console.log('📂 Opening file explorer for FACE image...');
-                    const facePath = openFileExplorer(`Select FACE Image for Cow ${i}`);
-                    faceImageBase64 = convertToBase64(facePath);
-                    console.log(`✅ Selected Face: ${facePath}`);
-
-                    break;
-                } catch (e: any) {
-                    console.log(`⚠️ ${e.message} Let's try selecting the images again.`);
-                }
+                const facePath = openFileExplorer(`Select FACE Image for Cow ${i}`);
+                faceImageBase64 = convertToBase64(facePath);
+            } catch (e: any) {
+                console.log(`⚠️ Selection failed: ${e.message}. Skipping this cow.`);
+                continue;
             }
 
-            // Generate Random Cow Data
             const tagNo = `TAG-${Math.floor(100000 + Math.random() * 900000)}`;
             const species = randomSpecies();
-            const sex = randomSex();
             const source = randomSource();
-            const productionStatus = randomStatus();
-
-            // --- ENDPOINT REPLICATION LOGIC ---
-            if (!tagNo || !species || !sex || !faceImageBase64 || !muzzleImageBase64) {
-                console.error('❌ Missing required fields. Skipping this cow.');
-                continue;
-            }
-
-            const existingCow = await Cattle.findOne({ tagNumber: tagNo });
-            if (existingCow) {
-                console.error(`❌ Cow with tag ${tagNo} already exists. Skipping.`);
-                continue;
-            }
 
             const newCow = new Cattle({
                 farmerId: farmer._id,
@@ -219,7 +180,7 @@ async function seedDatabase() {
                 name: `Cattle-${i}`,
                 species: species,
                 breed: 'Crossbreed',
-                sex: sex,
+                sex: randomSex(),
                 dob: new Date(Date.now() - Math.floor(Math.random() * 10000000000)),
                 ageMonths: Math.floor(Math.random() * 60) + 1,
                 source: source,
@@ -235,7 +196,7 @@ async function seedDatabase() {
                     backView: faceImageBase64,
                     tailView: faceImageBase64
                 },
-                currentStatus: productionStatus,
+                currentStatus: randomStatus(),
                 lastWeight: Math.floor(Math.random() * 400) + 100,
                 healthStats: {
                     growthStatus: 'Normal',
@@ -244,15 +205,14 @@ async function seedDatabase() {
                 }
             });
 
-            // 1. Save Cow
             const savedCow = await newCow.save();
 
-            // 2. Bind Cow to Farmer Document
+            // Link Cattle to User
             await User.findByIdAndUpdate(farmer._id, {
                 $push: { cows: savedCow._id }
             });
 
-            // 3. Call DL API for vector embeddings
+            // DL API Call
             try {
                 const dlApiUrl = process.env.DL_MODEL_SERVER_LINK || 'http://localhost:8000';
                 await axios.post(`${dlApiUrl}/register`, {
@@ -261,12 +221,12 @@ async function seedDatabase() {
                     face_image: faceImageBase64,
                     muzzle_image: muzzleImageBase64
                 });
-                console.log(`✅ DL API call successful for ${tagNo}`);
+                console.log(`✅ DL API vector registration successful for ${tagNo}`);
             } catch (dlError: any) {
-                console.error(`⚠️ Error calling DL API for embeddings on ${tagNo}:`, dlError.message);
+                console.error(`⚠️ DL API Error for ${tagNo}:`, dlError.message);
             }
 
-            console.log(`✅ Successfully registered cow ${i}/12 with Tag: ${tagNo}`);
+            console.log(`✅ Registered cow ${i} with Tag: ${tagNo}`);
         }
 
         console.log('\n🎉 Database seeding completed successfully!');
@@ -274,7 +234,7 @@ async function seedDatabase() {
         process.exit(0);
 
     } catch (error) {
-        console.error('❌ Database connection/seeding error:', error);
+        console.error('❌ Critical Error:', error);
         process.exit(1);
     }
 }
