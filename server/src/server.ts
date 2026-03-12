@@ -24,11 +24,23 @@ const port = process.env.PORT || 2424;
 // 2. Strict CORS Rules
 // Bulletproof Capacitor CORS Rules
 const corsOptions = {
-  origin: true, // Dynamically mirrors the request origin
+  // 1. ALLOW ALL ORIGINS (Reflects the incoming origin dynamically)
+  origin: (origin: any, callback: any) => {
+    callback(null, true);
+  },
+
+  // 2. ALLOW ALL METHODS
   methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
+
+  // 3. ALLOW CREDENTIALS (Cookies, Authorization headers)
   credentials: true,
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
-  optionsSuccessStatus: 200 // Some legacy browsers choke on 204
+
+  // 4. ALLOW ALL HEADERS 
+  // By completely omitting the 'allowedHeaders' property, the cors package 
+  // will automatically read the incoming 'Access-Control-Request-Headers' 
+  // and echo them back as fully approved!
+
+  optionsSuccessStatus: 200
 };
 
 // 3. GLOBAL MIDDLEWARE (Must be at the top!)
